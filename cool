@@ -659,62 +659,502 @@ local Library do
         return NewTween
     end
 
-    -- Config system
+    -- ==========================================
+    -- ENHANCED CONFIG SYSTEM WITH AUTOLOAD
+    -- Works on PC and Mobile
+    -- ==========================================
+    
+    -- Initialize config folders (call this early)
+    Library.InitFolders = function(self)
+        local success, err = pcall(function()
+            if not isfolder then return end
+            
+            -- Create main directory
+            if not isfolder(self.Folders.Directory) then
+                makefolder(self.Folders.Directory)
+            end
+            
+            -- Create subdirectories
+            if not isfolder(self.Folders.Configs) then
+                makefolder(self.Folders.Configs)
+            end
+            
+            if not isfolder(self.Folders.Assets) then
+                makefolder(self.Folders.Assets)
+            end
+            
+            if not isfolder(self.Folders.Themes) then
+                makefolder(self.Folders.Themes)
+            end
+        end)
+        
+        if not success then
+            warn("[SametLib] Failed to initialize folders: " .. tostring(err))
+        end
+        
+        return success
+    end
+    
+    -- Auto-init folders when library loads
+    Library:InitFolders()
+    
+    -- Get config file path with .json extension
+    Library.GetConfigPath = function(self, ConfigName)
+        local name = ConfigName or "default"
+        -- Remove .json if already present to avoid double extension
+        name = StringGSub(name, "%.json$", "")
+        return self.Folders.Configs .. "/" .. name .. ".json"
+    end
+    
+    -- Get autoload settings file path
+    Library.GetAutoLoadPath = function(self)
+        return self.Folders.Directory .. "/autoload.txt"
+    end
+    
+    -- Serialize all flags to JSON
     Library.GetConfig = function(self)
-        local Config = { } 
-        pcall(function()
-            for Index, Value in self.Flags do 
-                if type(Value) == "table" and Value.Key then
-                    Config[Index] = {Key = tostring(Value.Key), Mode = Value.Mode}
-                elseif type(Value) == "table" and Value.Color then
-                    Config[Index] = {Color = Value.HexValue, Alpha = Value.Alpha}
+        local Config = { }
+        local success, err = pcall(function()
+            for Index, Value in pairs(self.Flags) do
+                if type(Value) == "table" then
+                    if Value.Key ~= nil then
+                        -- Keybind
+                        Config[Index] = {
+                            Type = "Keybind",
+                            Key = tostring(Value.Key),
+                            Mode = Value.Mode or "Toggle"
+                        }
+                    elseif Value.Color ~= nil then
+                        -- Colorpicker
+                        Config[Index] = {
+                            Type = "Color",
+                            Color = Value.HexValue or "#FFFFFF",
+                            Alpha = Value.Alpha or 1
+                        }
+                    elseif Value[1] ~= nil then
+                        -- Array (dropdown multi-select)
+                        Config[Index] = {
+                            Type = "Array",
+                            Values = Value
+                        }
+                    else
+                        -- Generic table
+                        Config[Index] = Value
+                    end
                 else
                     Config[Index] = Value
                 end
             end
         end)
+        
+        if not success then
+            warn("[SametLib] Error getting config: " .. tostring(err))
+        end
+        
         return HttpService:JSONEncode(Config)
     end
-
-    Library.LoadConfig = function(self, Config)
-        local Decoded = HttpService:JSONDecode(Config)
-        pcall(function()
-            for Index, Value in Decoded do 
+    
+    -- Load config from JSON string
+    Library.LoadConfig = function(self, ConfigJSON)
+        local success, err = pcall(function()
+            local Decoded = HttpService:JSONDecode(ConfigJSON)
+            
+            for Index, Value in pairs(Decoded) do
                 local SetFunction = self.SetFlags[Index]
                 if not SetFunction then continue end
-                if type(Value) == "table" and Value.Key then 
-                    SetFunction(Value)
-                elseif type(Value) == "table" and Value.Color then
-                    SetFunction(Value.Color, Value.Alpha)
+                
+                if type(Value) == "table" then
+                    if Value.Type == "Keybind" then
+                        SetFunction({Key = Value.Key, Mode = Value.Mode})
+                    elseif Value.Type == "Color" then
+                        SetFunction(Value.Color, Value.Alpha)
+                    elseif Value.Type == "Array" then
+                        SetFunction(Value.Values)
+                    elseif Value.Key ~= nil then
+                        -- Legacy keybind format
+                        SetFunction({Key = tostring(Value.Key), Mode = Value.Mode})
+                    elseif Value.Color ~= nil then
+                        -- Legacy color format
+                        SetFunction(Value.Color, Value.Alpha)
+                    else
+                        SetFunction(Value)
+                    end
                 else
                     SetFunction(Value)
                 end
             end
         end)
+        
+        if not success then
+            warn("[SametLib] Error loading config: " .. tostring(err))
+            return false
+        end
+        
+        return true
     end
-
-    Library.DeleteConfig = function(self, Config)
-        if isfile(self.Folders.Configs .. "/" .. Config) then 
-            delfile(self.Folders.Configs .. "/" .. Config)
-            self:Notification("Success", "Deleted config " .. Config, 5)
+    
+    -- Load config from file by name
+    Library.LoadConfigFile = function(self, ConfigName, ShowNotification)
+        if ShowNotification == nil then ShowNotification = true end
+        
+        local FilePath = self:GetConfigPath(ConfigName)
+        
+        local success, err = pcall(function()
+            if not isfile or not readfile then
+                error("File system not available")
+            end
+            
+            if not isfile(FilePath) then
+                error("Config file not found: " .. ConfigName)
+            end
+            
+            local Content = readfile(FilePath)
+            if not Content or Content == "" then
+                error("Config file is empty")
+            end
+            
+            self:LoadConfig(Content)
+        end)
+        
+        if success then
+            if ShowNotification then
+                self:Notification("Config Loaded", "Loaded: " .. ConfigName, 3)
+            end
+            return true
+        else
+            if ShowNotification then
+                self:Notification("Error", "Failed to load: " .. tostring(err), 5)
+            end
+            warn("[SametLib] Failed to load config: " .. tostring(err))
+            return false
         end
     end
-
-    Library.SaveConfig = function(self, Config)
-        if isfile(self.Folders.Configs .. "/" .. Config) then
-            writefile(self.Folders.Configs .. "/" .. Config, self:GetConfig())
-            self:Notification("Success", "Saved config " .. Config, 5)
+    
+    -- Save config to file (creates new or overwrites)
+    Library.SaveConfig = function(self, ConfigName, ShowNotification)
+        if ShowNotification == nil then ShowNotification = true end
+        
+        if not ConfigName or ConfigName == "" then
+            if ShowNotification then
+                self:Notification("Error", "Please enter a config name", 3)
+            end
+            return false
+        end
+        
+        local FilePath = self:GetConfigPath(ConfigName)
+        
+        local success, err = pcall(function()
+            if not writefile then
+                error("File system not available")
+            end
+            
+            local ConfigData = self:GetConfig()
+            writefile(FilePath, ConfigData)
+        end)
+        
+        if success then
+            if ShowNotification then
+                self:Notification("Config Saved", "Saved: " .. ConfigName, 3)
+            end
+            return true
+        else
+            if ShowNotification then
+                self:Notification("Error", "Failed to save: " .. tostring(err), 5)
+            end
+            warn("[SametLib] Failed to save config: " .. tostring(err))
+            return false
         end
     end
-
-    Library.RefreshConfigsList = function(self, Element)
+    
+    -- Create new config (alias for SaveConfig)
+    Library.CreateConfig = function(self, ConfigName, ShowNotification)
+        return self:SaveConfig(ConfigName, ShowNotification)
+    end
+    
+    -- Delete config file
+    Library.DeleteConfig = function(self, ConfigName, ShowNotification)
+        if ShowNotification == nil then ShowNotification = true end
+        
+        local FilePath = self:GetConfigPath(ConfigName)
+        
+        local success, err = pcall(function()
+            if not isfile or not delfile then
+                error("File system not available")
+            end
+            
+            if not isfile(FilePath) then
+                error("Config not found: " .. ConfigName)
+            end
+            
+            delfile(FilePath)
+            
+            -- Clear autoload if this was the autoload config
+            local autoloadConfig = self:GetAutoLoad()
+            if autoloadConfig == ConfigName then
+                self:ClearAutoLoad()
+            end
+        end)
+        
+        if success then
+            if ShowNotification then
+                self:Notification("Config Deleted", "Deleted: " .. ConfigName, 3)
+            end
+            return true
+        else
+            if ShowNotification then
+                self:Notification("Error", "Failed to delete: " .. tostring(err), 5)
+            end
+            warn("[SametLib] Failed to delete config: " .. tostring(err))
+            return false
+        end
+    end
+    
+    -- Get list of all config files
+    Library.GetConfigsList = function(self)
         local List = { }
-        local ConfigFolderName = StringGSub(self.Folders.Configs, self.Folders.Directory .. "/", "")
-        for Index, Value in listfiles(self.Folders.Configs) do
-            local FileName = StringGSub(Value, self.Folders.Directory .. "\\" .. ConfigFolderName .. "\\", "")
-            List[Index] = FileName
+        
+        pcall(function()
+            if not isfolder or not listfiles then return end
+            if not isfolder(self.Folders.Configs) then return end
+            
+            local files = listfiles(self.Folders.Configs)
+            for _, FilePath in ipairs(files) do
+                -- Extract filename from path (handle both / and \)
+                local FileName = FilePath:match("([^/\\]+)$") or FilePath
+                -- Remove .json extension for display
+                FileName = StringGSub(FileName, "%.json$", "")
+                if FileName ~= "" then
+                    table.insert(List, FileName)
+                end
+            end
+        end)
+        
+        return List
+    end
+    
+    -- Refresh a dropdown element with config list
+    Library.RefreshConfigsList = function(self, Element)
+        if Element and Element.Refresh then
+            Element:Refresh(self:GetConfigsList())
         end
-        Element:Refresh(List)
+    end
+    
+    -- ==========================================
+    -- AUTOLOAD SYSTEM
+    -- ==========================================
+    
+    -- Set autoload config (saves to file)
+    Library.SetAutoLoad = function(self, ConfigName, ShowNotification)
+        if ShowNotification == nil then ShowNotification = true end
+        
+        local success, err = pcall(function()
+            if not writefile then
+                error("File system not available")
+            end
+            
+            local AutoLoadPath = self:GetAutoLoadPath()
+            
+            if ConfigName and ConfigName ~= "" then
+                -- Verify config exists before setting autoload
+                local ConfigPath = self:GetConfigPath(ConfigName)
+                if isfile and not isfile(ConfigPath) then
+                    error("Config does not exist: " .. ConfigName)
+                end
+                
+                writefile(AutoLoadPath, ConfigName)
+            else
+                -- Clear autoload
+                if isfile and isfile(AutoLoadPath) then
+                    delfile(AutoLoadPath)
+                end
+            end
+        end)
+        
+        if success then
+            if ShowNotification then
+                if ConfigName and ConfigName ~= "" then
+                    self:Notification("AutoLoad Set", "Will load: " .. ConfigName, 3)
+                else
+                    self:Notification("AutoLoad Cleared", "No config will auto-load", 3)
+                end
+            end
+            return true
+        else
+            if ShowNotification then
+                self:Notification("Error", "Failed to set autoload: " .. tostring(err), 5)
+            end
+            warn("[SametLib] Failed to set autoload: " .. tostring(err))
+            return false
+        end
+    end
+    
+    -- Get current autoload config name
+    Library.GetAutoLoad = function(self)
+        local ConfigName = nil
+        
+        pcall(function()
+            if not isfile or not readfile then return end
+            
+            local AutoLoadPath = self:GetAutoLoadPath()
+            if isfile(AutoLoadPath) then
+                local content = readfile(AutoLoadPath)
+                if content and content ~= "" then
+                    ConfigName = content
+                end
+            end
+        end)
+        
+        return ConfigName
+    end
+    
+    -- Clear autoload setting
+    Library.ClearAutoLoad = function(self, ShowNotification)
+        return self:SetAutoLoad(nil, ShowNotification)
+    end
+    
+    -- Check and execute autoload on startup
+    -- Call this AFTER all UI elements are created
+    Library.CheckAutoLoad = function(self, ShowNotification)
+        if ShowNotification == nil then ShowNotification = true end
+        
+        local AutoLoadConfig = self:GetAutoLoad()
+        if AutoLoadConfig and AutoLoadConfig ~= "" then
+            -- Small delay to ensure UI is ready
+            task.delay(0.5, function()
+                local success = self:LoadConfigFile(AutoLoadConfig, false)
+                if success and ShowNotification then
+                    self:Notification("AutoLoad", "Loaded: " .. AutoLoadConfig, 3)
+                elseif not success and ShowNotification then
+                    self:Notification("AutoLoad Failed", "Could not load: " .. AutoLoadConfig, 5)
+                end
+            end)
+            return true
+        end
+        return false
+    end
+    
+    -- ==========================================
+    -- CONFIG UI HELPER
+    -- Creates a complete config section with all controls
+    -- ==========================================
+    Library.CreateConfigSection = function(self, Page, SectionName)
+        local Section = Page:Section({Name = SectionName or "Configs", Side = "Right"})
+        
+        local SelectedConfig = ""
+        local ConfigDropdown
+        local ConfigNameBox
+        
+        -- Config name input
+        ConfigNameBox = Section:Textbox({
+            Name = "Config Name",
+            Placeholder = "Enter config name...",
+            Callback = function(Value)
+                SelectedConfig = Value
+            end
+        })
+        
+        -- Config selector dropdown
+        ConfigDropdown = Section:Dropdown({
+            Name = "Select Config",
+            Options = self:GetConfigsList(),
+            Callback = function(Value)
+                SelectedConfig = Value
+            end
+        })
+        
+        -- Refresh button
+        Section:Button({
+            Name = "Refresh List",
+            Callback = function()
+                self:RefreshConfigsList(ConfigDropdown)
+            end
+        })
+        
+        -- Save button
+        Section:Button({
+            Name = "Save Config",
+            Callback = function()
+                if SelectedConfig and SelectedConfig ~= "" then
+                    if self:SaveConfig(SelectedConfig) then
+                        self:RefreshConfigsList(ConfigDropdown)
+                    end
+                else
+                    self:Notification("Error", "Enter a config name first", 3)
+                end
+            end
+        })
+        
+        -- Load button
+        Section:Button({
+            Name = "Load Config",
+            Callback = function()
+                if SelectedConfig and SelectedConfig ~= "" then
+                    self:LoadConfigFile(SelectedConfig)
+                else
+                    self:Notification("Error", "Select a config first", 3)
+                end
+            end
+        })
+        
+        -- Delete button
+        Section:Button({
+            Name = "Delete Config",
+            Callback = function()
+                if SelectedConfig and SelectedConfig ~= "" then
+                    if self:DeleteConfig(SelectedConfig) then
+                        self:RefreshConfigsList(ConfigDropdown)
+                        SelectedConfig = ""
+                    end
+                else
+                    self:Notification("Error", "Select a config first", 3)
+                end
+            end
+        })
+        
+        -- Autoload toggle
+        local currentAutoLoad = self:GetAutoLoad()
+        Section:Toggle({
+            Name = "Set as AutoLoad",
+            Default = currentAutoLoad == SelectedConfig and SelectedConfig ~= "",
+            Callback = function(Value)
+                if Value then
+                    if SelectedConfig and SelectedConfig ~= "" then
+                        self:SetAutoLoad(SelectedConfig)
+                    else
+                        self:Notification("Error", "Select a config first", 3)
+                    end
+                else
+                    self:ClearAutoLoad()
+                end
+            end
+        })
+        
+        -- Show current autoload
+        local autoLoadLabel = Section:Label({
+            Name = "AutoLoad: " .. (currentAutoLoad or "None")
+        })
+        
+        -- Refresh autoload label when dropdown changes
+        local originalCallback = ConfigDropdown.Callback
+        ConfigDropdown.Callback = function(Value)
+            SelectedConfig = Value
+            if originalCallback then originalCallback(Value) end
+            
+            -- Update autoload label
+            local current = self:GetAutoLoad()
+            if autoLoadLabel and autoLoadLabel.Instance then
+                autoLoadLabel.Instance.Text = "AutoLoad: " .. (current or "None")
+            end
+        end
+        
+        return {
+            Section = Section,
+            Dropdown = ConfigDropdown,
+            Textbox = ConfigNameBox,
+            Refresh = function()
+                self:RefreshConfigsList(ConfigDropdown)
+            end
+        }
     end
 
     -- Notification system
