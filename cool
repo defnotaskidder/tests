@@ -3510,5 +3510,254 @@ local Library do
     end
 end
 
+-- ==========================================
+-- MOBILE TOGGLE BUTTON
+-- Creates a draggable floating button for mobile users to toggle the UI
+-- ==========================================
+Library.CreateMobileToggle = function(self, Options)
+    Options = Options or {}
+    
+    -- Only create on mobile, unless forced
+    if not self.IsMobile and not Options.Force then
+        return nil
+    end
+    
+    local MobileToggle = {
+        Visible = true,
+        Window = Options.Window or nil,
+    }
+    
+    -- Settings with defaults
+    local Size = Options.Size or 50
+    local Position = Options.Position or UDim2New(1, -70, 0.5, -25)
+    local Color = Options.Color or FromRGB(200, 55, 55) -- Red default
+    local Icon = Options.Icon or "rbxassetid://6034287594" -- Basketball icon
+    local IconSize = Options.IconSize or 0.6
+    local Draggable = Options.Draggable ~= false -- Default true
+    local Callback = Options.Callback
+    
+    -- Create ScreenGui
+    local ToggleGui = Instance.new("ScreenGui")
+    ToggleGui.Name = "SametLib_MobileToggle"
+    ToggleGui.ResetOnSpawn = false
+    ToggleGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
+    ToggleGui.DisplayOrder = 999
+    
+    -- Try to parent to CoreGui, fallback to PlayerGui
+    pcall(function()
+        if syn and syn.protect_gui then
+            syn.protect_gui(ToggleGui)
+            ToggleGui.Parent = game:GetService("CoreGui")
+        elseif gethui then
+            ToggleGui.Parent = gethui()
+        else
+            ToggleGui.Parent = game:GetService("CoreGui")
+        end
+    end)
+    if not ToggleGui.Parent then
+        ToggleGui.Parent = game:GetService("Players").LocalPlayer:WaitForChild("PlayerGui")
+    end
+    
+    -- Main button frame
+    local Button = Instance.new("Frame")
+    Button.Name = "ToggleButton"
+    Button.Size = UDim2New(0, Size, 0, Size)
+    Button.Position = Position
+    Button.BackgroundColor3 = Color
+    Button.BorderSizePixel = 0
+    Button.Active = true
+    Button.Parent = ToggleGui
+    
+    -- Make circular
+    local Corner = Instance.new("UICorner")
+    Corner.CornerRadius = UDimNew(1, 0)
+    Corner.Parent = Button
+    
+    -- Add stroke
+    local Stroke = Instance.new("UIStroke")
+    Stroke.Color = FromRGB(255, 255, 255)
+    Stroke.Thickness = 2
+    Stroke.Transparency = 0.5
+    Stroke.Parent = Button
+    
+    -- Icon
+    local IconLabel = Instance.new("ImageLabel")
+    IconLabel.Name = "Icon"
+    IconLabel.Size = UDim2New(IconSize, 0, IconSize, 0)
+    IconLabel.Position = UDim2New(0.5, 0, 0.5, 0)
+    IconLabel.AnchorPoint = Vector2.new(0.5, 0.5)
+    IconLabel.BackgroundTransparency = 1
+    IconLabel.Image = Icon
+    IconLabel.ImageColor3 = FromRGB(255, 255, 255)
+    IconLabel.Parent = Button
+    
+    -- Shadow effect
+    local Shadow = Instance.new("Frame")
+    Shadow.Name = "Shadow"
+    Shadow.Size = UDim2New(1, 6, 1, 6)
+    Shadow.Position = UDim2New(0.5, 0, 0.5, 0)
+    Shadow.AnchorPoint = Vector2.new(0.5, 0.5)
+    Shadow.BackgroundColor3 = FromRGB(0, 0, 0)
+    Shadow.BackgroundTransparency = 0.7
+    Shadow.BorderSizePixel = 0
+    Shadow.ZIndex = -1
+    Shadow.Parent = Button
+    
+    local ShadowCorner = Instance.new("UICorner")
+    ShadowCorner.CornerRadius = UDimNew(1, 0)
+    ShadowCorner.Parent = Shadow
+    
+    -- Dragging logic
+    if Draggable then
+        local dragging = false
+        local dragStart = nil
+        local startPos = nil
+        local hasMoved = false
+        
+        Button.InputBegan:Connect(function(input)
+            if input.UserInputType == Enum.UserInputType.Touch or input.UserInputType == Enum.UserInputType.MouseButton1 then
+                dragging = true
+                hasMoved = false
+                dragStart = input.Position
+                startPos = Button.Position
+                
+                -- Visual feedback
+                TweenService:Create(Button, TweenInfo.new(0.1), {Size = UDim2New(0, Size * 0.9, 0, Size * 0.9)}):Play()
+            end
+        end)
+        
+        Button.InputChanged:Connect(function(input)
+            if dragging and (input.UserInputType == Enum.UserInputType.Touch or input.UserInputType == Enum.UserInputType.MouseMovement) then
+                local delta = input.Position - dragStart
+                if delta.Magnitude > 5 then
+                    hasMoved = true
+                end
+                Button.Position = UDim2New(
+                    startPos.X.Scale, startPos.X.Offset + delta.X,
+                    startPos.Y.Scale, startPos.Y.Offset + delta.Y
+                )
+            end
+        end)
+        
+        Button.InputEnded:Connect(function(input)
+            if input.UserInputType == Enum.UserInputType.Touch or input.UserInputType == Enum.UserInputType.MouseButton1 then
+                dragging = false
+                
+                -- Reset size
+                TweenService:Create(Button, TweenInfo.new(0.1), {Size = UDim2New(0, Size, 0, Size)}):Play()
+                
+                -- If didn't move much, treat as tap/click
+                if not hasMoved then
+                    -- Toggle the window
+                    if MobileToggle.Window then
+                        local isOpen = MobileToggle.Window.IsOpen
+                        if MobileToggle.Window.SetOpen then
+                            MobileToggle.Window:SetOpen(not isOpen)
+                        end
+                    end
+                    
+                    -- Call custom callback
+                    if Callback then
+                        pcall(Callback, MobileToggle)
+                    end
+                    
+                    -- Pulse animation
+                    TweenService:Create(Button, TweenInfo.new(0.1), {Size = UDim2New(0, Size * 1.1, 0, Size * 1.1)}):Play()
+                    task.delay(0.1, function()
+                        TweenService:Create(Button, TweenInfo.new(0.1), {Size = UDim2New(0, Size, 0, Size)}):Play()
+                    end)
+                end
+            end
+        end)
+    else
+        -- Non-draggable - just tap to toggle
+        Button.InputBegan:Connect(function(input)
+            if input.UserInputType == Enum.UserInputType.Touch or input.UserInputType == Enum.UserInputType.MouseButton1 then
+                TweenService:Create(Button, TweenInfo.new(0.1), {Size = UDim2New(0, Size * 0.9, 0, Size * 0.9)}):Play()
+            end
+        end)
+        
+        Button.InputEnded:Connect(function(input)
+            if input.UserInputType == Enum.UserInputType.Touch or input.UserInputType == Enum.UserInputType.MouseButton1 then
+                TweenService:Create(Button, TweenInfo.new(0.1), {Size = UDim2New(0, Size, 0, Size)}):Play()
+                
+                -- Toggle the window
+                if MobileToggle.Window then
+                    local isOpen = MobileToggle.Window.IsOpen
+                    if MobileToggle.Window.SetOpen then
+                        MobileToggle.Window:SetOpen(not isOpen)
+                    end
+                end
+                
+                -- Call custom callback
+                if Callback then
+                    pcall(Callback, MobileToggle)
+                end
+            end
+        end)
+    end
+    
+    -- Methods
+    function MobileToggle:SetVisible(Bool)
+        self.Visible = Bool
+        ToggleGui.Enabled = Bool
+    end
+    
+    function MobileToggle:SetPosition(NewPosition)
+        Button.Position = NewPosition
+    end
+    
+    function MobileToggle:SetColor(NewColor)
+        Button.BackgroundColor3 = NewColor
+    end
+    
+    function MobileToggle:SetIcon(NewIcon)
+        IconLabel.Image = NewIcon
+    end
+    
+    function MobileToggle:SetWindow(Window)
+        self.Window = Window
+    end
+    
+    function MobileToggle:Destroy()
+        if ToggleGui then
+            ToggleGui:Destroy()
+        end
+    end
+    
+    -- Store reference
+    MobileToggle.Gui = ToggleGui
+    MobileToggle.Button = Button
+    MobileToggle.Icon = IconLabel
+    
+    return MobileToggle
+end
+
+-- ==========================================
+-- CLEANUP FUNCTION
+-- Call this to properly clean up the library
+-- ==========================================
+Library.CleanupMobileMovement = function(self)
+    -- Remove any leftover BodyVelocity from previous script runs
+    pcall(function()
+        local LP = game:GetService("Players").LocalPlayer
+        if LP and LP.Character then
+            local hrp = LP.Character:FindFirstChild("HumanoidRootPart")
+            if hrp then
+                for _, child in ipairs(hrp:GetChildren()) do
+                    if child:IsA("BodyVelocity") or child:IsA("BodyGyro") or child:IsA("BodyPosition") then
+                        if child.Name:find("SkiiHub") or child.Name:find("MobileMove") then
+                            child:Destroy()
+                        end
+                    end
+                end
+            end
+        end
+    end)
+end
+
+-- Auto-cleanup on library load
+Library:CleanupMobileMovement()
+
 getgenv().Library = Library
 return Library
