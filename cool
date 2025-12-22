@@ -2012,6 +2012,12 @@ local Library do
         end
 
         Items["Inactive"]:Connect("MouseButton1Down", function()
+            -- Mobile: If clicking already active page, toggle the window
+            if Page.Active and IS_MOBILE then
+                Page.Window:SetOpen(not Page.Window.IsOpen)
+                return
+            end
+            -- Normal behavior: select this page
             for _, Value in Page.Window.Pages do
                 Value:Turn(Value == Page)
             end
@@ -2221,6 +2227,37 @@ local Library do
         if #SubPage.Window.SubPages == 0 then SubPage:Turn(true) end
         SubPage.Items = Items
         TableInsert(SubPage.Window.SubPages, SubPage)
+        
+        -- AUTO-HIDE SubPage tabs when there's only one SubPage
+        -- This makes features show directly without clicking a tab
+        task.defer(function()
+            task.wait(0.1) -- Wait for all SubPages to be created
+            local pageSubPages = {}
+            for _, sp in SubPage.Window.SubPages do
+                if sp.Page == SubPage.Page then
+                    table.insert(pageSubPages, sp)
+                end
+            end
+            
+            if #pageSubPages == 1 then
+                -- Hide the SubPage tabs bar
+                SubPage.Page.Items["SubPages"].Instance.Visible = false
+                
+                -- Move content up to fill the space
+                local hasSearch = SubPage.Page.Search
+                if hasSearch then
+                    SubPage.Page.Items["Columns"].Instance.Position = UDim2New(0, 0, 0, 60)
+                    SubPage.Page.Items["Columns"].Instance.Size = UDim2New(1, 0, 1, -60)
+                else
+                    SubPage.Page.Items["Columns"].Instance.Position = UDim2New(0, 0, 0, 15)
+                    SubPage.Page.Items["Columns"].Instance.Size = UDim2New(1, 0, 1, -15)
+                end
+                
+                -- Hide the SubPage tab button itself
+                Items["Inactive"].Instance.Visible = false
+            end
+        end)
+        
         return setmetatable(SubPage, Library.Pages)
     end
 
@@ -3558,13 +3595,15 @@ Library.CreateMobileToggle = function(self, Options)
         ToggleGui.Parent = game:GetService("Players").LocalPlayer:WaitForChild("PlayerGui")
     end
     
-    -- Main button frame
-    local Button = Instance.new("Frame")
+    -- Main button using TextButton for better touch detection
+    local Button = Instance.new("TextButton")
     Button.Name = "ToggleButton"
     Button.Size = UDim2New(0, Size, 0, Size)
     Button.Position = Position
     Button.BackgroundColor3 = Color
     Button.BorderSizePixel = 0
+    Button.Text = ""
+    Button.AutoButtonColor = false
     Button.Active = true
     Button.Parent = ToggleGui
     
@@ -3607,93 +3646,80 @@ Library.CreateMobileToggle = function(self, Options)
     ShadowCorner.CornerRadius = UDimNew(1, 0)
     ShadowCorner.Parent = Shadow
     
-    -- Dragging logic
+    -- Toggle function
+    local function doToggle()
+        if MobileToggle.Window then
+            pcall(function()
+                local currentState = MobileToggle.Window.IsOpen
+                MobileToggle.Window:SetOpen(not currentState)
+            end)
+        end
+        if Callback then
+            pcall(Callback, MobileToggle)
+        end
+        -- Pulse animation
+        TweenService:Create(Button, TweenInfo.new(0.1), {Size = UDim2New(0, Size * 1.1, 0, Size * 1.1)}):Play()
+        task.delay(0.1, function()
+            TweenService:Create(Button, TweenInfo.new(0.1), {Size = UDim2New(0, Size, 0, Size)}):Play()
+        end)
+    end
+    
     if Draggable then
+        -- Dragging state
         local dragging = false
         local dragStart = nil
         local startPos = nil
-        local hasMoved = false
+        local totalDragDistance = 0
         
-        Button.InputBegan:Connect(function(input)
-            if input.UserInputType == Enum.UserInputType.Touch or input.UserInputType == Enum.UserInputType.MouseButton1 then
-                dragging = true
-                hasMoved = false
-                dragStart = input.Position
-                startPos = Button.Position
-                
-                -- Visual feedback
-                TweenService:Create(Button, TweenInfo.new(0.1), {Size = UDim2New(0, Size * 0.9, 0, Size * 0.9)}):Play()
-            end
+        Button.MouseButton1Down:Connect(function(x, y)
+            dragging = true
+            totalDragDistance = 0
+            dragStart = Vector2.new(x, y)
+            startPos = Button.Position
+            TweenService:Create(Button, TweenInfo.new(0.1), {Size = UDim2New(0, Size * 0.9, 0, Size * 0.9)}):Play()
         end)
         
-        Button.InputChanged:Connect(function(input)
-            if dragging and (input.UserInputType == Enum.UserInputType.Touch or input.UserInputType == Enum.UserInputType.MouseMovement) then
-                local delta = input.Position - dragStart
-                if delta.Magnitude > 5 then
-                    hasMoved = true
-                end
+        -- Use UserInputService for global input tracking (works with touch)
+        UserInputService.InputChanged:Connect(function(input)
+            if not dragging then return end
+            if input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch then
+                local currentPos = Vector2.new(input.Position.X, input.Position.Y)
+                local delta = currentPos - dragStart
+                totalDragDistance = totalDragDistance + delta.Magnitude
+                
                 Button.Position = UDim2New(
                     startPos.X.Scale, startPos.X.Offset + delta.X,
                     startPos.Y.Scale, startPos.Y.Offset + delta.Y
                 )
+                dragStart = currentPos
+                startPos = Button.Position
             end
         end)
         
-        Button.InputEnded:Connect(function(input)
-            if input.UserInputType == Enum.UserInputType.Touch or input.UserInputType == Enum.UserInputType.MouseButton1 then
+        UserInputService.InputEnded:Connect(function(input)
+            if not dragging then return end
+            if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
                 dragging = false
-                
-                -- Reset size
                 TweenService:Create(Button, TweenInfo.new(0.1), {Size = UDim2New(0, Size, 0, Size)}):Play()
                 
-                -- If didn't move much, treat as tap/click
-                if not hasMoved then
-                    -- Toggle the window
-                    if MobileToggle.Window then
-                        local isOpen = MobileToggle.Window.IsOpen
-                        if MobileToggle.Window.SetOpen then
-                            MobileToggle.Window:SetOpen(not isOpen)
-                        end
-                    end
-                    
-                    -- Call custom callback
-                    if Callback then
-                        pcall(Callback, MobileToggle)
-                    end
-                    
-                    -- Pulse animation
-                    TweenService:Create(Button, TweenInfo.new(0.1), {Size = UDim2New(0, Size * 1.1, 0, Size * 1.1)}):Play()
-                    task.delay(0.1, function()
-                        TweenService:Create(Button, TweenInfo.new(0.1), {Size = UDim2New(0, Size, 0, Size)}):Play()
-                    end)
+                -- Only toggle if didn't drag much (tap vs drag)
+                if totalDragDistance < 10 then
+                    doToggle()
                 end
             end
         end)
     else
-        -- Non-draggable - just tap to toggle
-        Button.InputBegan:Connect(function(input)
-            if input.UserInputType == Enum.UserInputType.Touch or input.UserInputType == Enum.UserInputType.MouseButton1 then
-                TweenService:Create(Button, TweenInfo.new(0.1), {Size = UDim2New(0, Size * 0.9, 0, Size * 0.9)}):Play()
-            end
+        -- Non-draggable - simple tap/click
+        Button.MouseButton1Click:Connect(function()
+            doToggle()
         end)
         
-        Button.InputEnded:Connect(function(input)
-            if input.UserInputType == Enum.UserInputType.Touch or input.UserInputType == Enum.UserInputType.MouseButton1 then
-                TweenService:Create(Button, TweenInfo.new(0.1), {Size = UDim2New(0, Size, 0, Size)}):Play()
-                
-                -- Toggle the window
-                if MobileToggle.Window then
-                    local isOpen = MobileToggle.Window.IsOpen
-                    if MobileToggle.Window.SetOpen then
-                        MobileToggle.Window:SetOpen(not isOpen)
-                    end
-                end
-                
-                -- Call custom callback
-                if Callback then
-                    pcall(Callback, MobileToggle)
-                end
-            end
+        Button.MouseButton1Down:Connect(function()
+            TweenService:Create(Button, TweenInfo.new(0.1), {Size = UDim2New(0, Size * 0.9, 0, Size * 0.9)}):Play()
+        end)
+        
+        Button.MouseButton1Up:Connect(function()
+            TweenService:Create(Button, TweenInfo.new(0.1), {Size = UDim2New(0, Size, 0, Size)}):Play()
         end)
     end
     
