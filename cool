@@ -2228,36 +2228,6 @@ local Library do
         SubPage.Items = Items
         TableInsert(SubPage.Window.SubPages, SubPage)
         
-        -- AUTO-HIDE SubPage tabs when there's only one SubPage
-        -- This makes features show directly without clicking a tab
-        task.defer(function()
-            task.wait(0.1) -- Wait for all SubPages to be created
-            local pageSubPages = {}
-            for _, sp in SubPage.Window.SubPages do
-                if sp.Page == SubPage.Page then
-                    table.insert(pageSubPages, sp)
-                end
-            end
-            
-            if #pageSubPages == 1 then
-                -- Hide the SubPage tabs bar
-                SubPage.Page.Items["SubPages"].Instance.Visible = false
-                
-                -- Move content up to fill the space
-                local hasSearch = SubPage.Page.Search
-                if hasSearch then
-                    SubPage.Page.Items["Columns"].Instance.Position = UDim2New(0, 0, 0, 60)
-                    SubPage.Page.Items["Columns"].Instance.Size = UDim2New(1, 0, 1, -60)
-                else
-                    SubPage.Page.Items["Columns"].Instance.Position = UDim2New(0, 0, 0, 15)
-                    SubPage.Page.Items["Columns"].Instance.Size = UDim2New(1, 0, 1, -15)
-                end
-                
-                -- Hide the SubPage tab button itself
-                Items["Inactive"].Instance.Visible = false
-            end
-        end)
-        
         return setmetatable(SubPage, Library.Pages)
     end
 
