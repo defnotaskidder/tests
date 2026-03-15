@@ -1834,6 +1834,113 @@ local Library do
         end)
 
         Window.Items = Items
+
+        local IsMobileUser = UserInputService.TouchEnabled and not UserInputService.KeyboardEnabled
+        Window.IsMobile = IsMobileUser
+        Window.MobileToggleVisible = true
+
+        local MobileToggleGui = InstanceNew("ScreenGui")
+        MobileToggleGui.Name = "LibraryMobileToggle"
+        MobileToggleGui.ResetOnSpawn = false
+        MobileToggleGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
+        MobileToggleGui.DisplayOrder = 999
+
+        local ToggleButton = InstanceNew("ImageButton")
+        ToggleButton.Name = "ToggleBtn"
+        ToggleButton.Size = UDim2New(0, 50, 0, 50)
+        ToggleButton.Position = UDim2New(0, 15, 0.5, -25)
+        ToggleButton.BackgroundColor3 = FromRGB(14, 14, 14)
+        ToggleButton.BackgroundTransparency = 0
+        ToggleButton.BorderSizePixel = 0
+        ToggleButton.Image = "rbxthumb://type=AvatarHeadShot&id=" .. LocalPlayer.UserId .. "&w=150&h=150"
+        ToggleButton.ScaleType = Enum.ScaleType.Fit
+        ToggleButton.Parent = MobileToggleGui
+
+        local ToggleCorner = InstanceNew("UICorner")
+        ToggleCorner.CornerRadius = UDimNew(1, 0)
+        ToggleCorner.Parent = ToggleButton
+
+        local ToggleStroke = InstanceNew("UIStroke")
+        ToggleStroke.Color = Library.Theme.Accent
+        ToggleStroke.Thickness = 2
+        ToggleStroke.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
+        ToggleStroke.Parent = ToggleButton
+
+        local ToggleShadow = InstanceNew("ImageLabel")
+        ToggleShadow.Name = "Shadow"
+        ToggleShadow.Parent = ToggleButton
+        ToggleShadow.BackgroundTransparency = 1
+        ToggleShadow.Position = UDim2New(0.5, 0, 0.5, 0)
+        ToggleShadow.Size = UDim2New(1, 20, 1, 20)
+        ToggleShadow.AnchorPoint = Vector2New(0.5, 0.5)
+        ToggleShadow.Image = "rbxassetid://112971167999062"
+        ToggleShadow.ImageColor3 = FromRGB(0, 0, 0)
+        ToggleShadow.ImageTransparency = 0.5
+        ToggleShadow.ScaleType = Enum.ScaleType.Slice
+        ToggleShadow.SliceCenter = RectNew(Vector2New(112, 112), Vector2New(147, 147))
+        ToggleShadow.SliceScale = 0.6
+        ToggleShadow.ZIndex = -1
+
+        local MobileToggleDragging = false
+        local MobileToggleDragStart = nil
+        local MobileToggleStartPos = nil
+
+        ToggleButton.InputBegan:Connect(function(Input)
+            if Input.UserInputType == Enum.UserInputType.Touch or Input.UserInputType == Enum.UserInputType.MouseButton1 then
+                MobileToggleDragging = true
+                MobileToggleDragStart = Input.Position
+                MobileToggleStartPos = ToggleButton.Position
+            end
+        end)
+
+        ToggleButton.InputEnded:Connect(function(Input)
+            if Input.UserInputType == Enum.UserInputType.Touch or Input.UserInputType == Enum.UserInputType.MouseButton1 then
+                MobileToggleDragging = false
+            end
+        end)
+
+        Library:Connect(UserInputService.InputChanged, function(Input)
+            if MobileToggleDragging and (Input.UserInputType == Enum.UserInputType.Touch or Input.UserInputType == Enum.UserInputType.MouseMovement) then
+                local Delta = Input.Position - MobileToggleDragStart
+                ToggleButton.Position = UDim2New(
+                    MobileToggleStartPos.X.Scale, MobileToggleStartPos.X.Offset + Delta.X,
+                    MobileToggleStartPos.Y.Scale, MobileToggleStartPos.Y.Offset + Delta.Y
+                )
+            end
+        end)
+
+        local MobileToggleClickStart = nil
+        local MobileToggleClickPos = nil
+
+        ToggleButton.MouseButton1Down:Connect(function()
+            MobileToggleClickStart = tick()
+            MobileToggleClickPos = ToggleButton.Position
+        end)
+
+        ToggleButton.MouseButton1Up:Connect(function()
+            local Moved = MobileToggleClickPos and (MathAbs(ToggleButton.Position.X.Offset - MobileToggleClickPos.X.Offset) > 5 or MathAbs(ToggleButton.Position.Y.Offset - MobileToggleClickPos.Y.Offset) > 5)
+            if MobileToggleClickStart and (tick() - MobileToggleClickStart) < 0.3 and not Moved then
+                Window:SetOpen(not Window.IsOpen)
+                ToggleButton.ImageTransparency = Window.IsOpen and 0 or 0.5
+                ToggleStroke.Color = Window.IsOpen and Library.Theme.Accent or FromRGB(100, 100, 100)
+            end
+            MobileToggleClickStart = nil
+        end)
+
+        pcall(function()
+            MobileToggleGui.Parent = gethui()
+        end)
+
+        Window.MobileToggleButton = ToggleButton
+        Window.MobileToggleGui = MobileToggleGui
+
+        Window.SetMobileToggleVisible = function(Visible)
+            Window.MobileToggleVisible = Visible
+            if MobileToggleGui then
+                MobileToggleGui.Enabled = Visible
+            end
+        end
+
         Window:SetOpen(true)
         return setmetatable(Window, Library)
     end
