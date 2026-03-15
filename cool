@@ -4188,7 +4188,7 @@ local Library do
             Name = Textbox.Name,
             Element = Items["Text"],
             Section = Textbox.Section,
-        }wwwwww
+        }
 
         TableInsert(Textbox.Page.SearchItems, SearchData)
 
